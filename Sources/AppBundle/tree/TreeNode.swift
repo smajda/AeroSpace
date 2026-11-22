@@ -113,6 +113,15 @@ open class TreeNode: Equatable, AeroAny {
         _parent.markAsMostRecentChild()
     }
 
+    /// Rolodex accordion: cyclically rotate children so that `child` becomes the last one.
+    /// The relative cyclic order of the children is preserved. MRU and weights are not touched
+    func rotateChildren(makeLast child: TreeNode) {
+        guard let index = _children.firstIndex(where: { $0 === child }) else { return }
+        let split = index + 1
+        if split == _children.count { return }
+        _children = Array(_children[split...] + _children[..<split])
+    }
+
     var mostRecentChild: TreeNode? { _mruChildren.mostRecent ?? children.last }
 
     var mruChildren: MruStack<TreeNode> { _mruChildren }

@@ -32,6 +32,7 @@ func runHeavyCompleteRefreshSession(
     if !TrayMenuModel.shared.isEnabled { return }
     let res = await Result {
         try await $refreshSessionEvent.withValue(event) {
+            await waitForCascadeRaises()
             let nativeFocused = try await getNativeFocusedWindow(.cancellable)
             if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
             updateFocusCache(nativeFocused)
@@ -66,6 +67,7 @@ func runLightSession<T>(
     activeRefreshTask?.cancel() // Give priority to runSession
     activeRefreshTask = nil
     return try await $refreshSessionEvent.withValue(event) {
+        await waitForCascadeRaises()
         let nativeFocused = try await getNativeFocusedWindow(.cancellable)
         if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
         updateFocusCache(nativeFocused)

@@ -25,6 +25,9 @@ struct FocusCommand: Command {
         switch args.target {
             case .direction(let direction):
                 let window = target.windowOrNil
+                if config.accordionRolodex, let rolodexTarget = window?.rolodexWindowToFocus(direction) {
+                    return .from(bool: rolodexTarget.focusWindow())
+                }
                 if let (parent, ownIndex) = window?.closestParent(hasChildrenInDirection: direction, withLayout: nil) {
                     guard let windowToFocus = parent.children[ownIndex + direction.focusOffset]
                         .findLeafWindowRecursive(snappedTo: direction.opposite) else { return .fail(io.err(bugPrompt())) }
@@ -212,5 +215,24 @@ extension TreeNode {
                  .floatingWindowsContainer:
                 die("Impossible")
         }
+    }
+}
+
+extension Window {
+    /// Rolodex accordion: navigation along the accordion's orientation cycles through the cards (wraps around).
+    /// up/left brings the card right behind the focused one to the front, down/right brings the back-most card to the front.
+    /// Returns nil if the regular focus logic must be used
+    @MainActor
+    fileprivate func rolodexWindowToFocus(_ direction: CardinalDirection) -> Window? {
+        for node in parentsWithSelf {
+            guard let parent = node.parent as? TilingContainer, let ownIndex = node.ownIndex else { return nil }
+            if parent.orientation != direction.orientation { continue }
+            if parent.layout == .accordion && parent.children.count >= 2 {
+                let count = parent.children.count
+                return parent.children[(ownIndex + direction.focusOffset + count) % count].mostRecentWindowRecursive
+            }
+            if parent.children.indices.contains(ownIndex + direction.focusOffset) { return nil } // Regular navigation inside tiles
+        }
+        return nil
     }
 }

@@ -45,6 +45,8 @@ struct Config: ConvenienceMutable {
     var autoReloadConfig: Bool = false
     var automaticallyUnhideMacosHiddenApps: Bool = false
     var accordionPadding: Int = 30
+    var accordionCascade: Bool = false // Every accordion card peeks out, not only neighbors of the focused one
+    var accordionRolodex: Bool = false // Implies accordionCascade. The focused card is always rotated to the front
     var enableNormalizationOppositeOrientationForNestedContainers: Bool = true
     var persistentWorkspaces: OrderedSet<String> = []
     var execOnWorkspaceChange: [String] = [] // todo deprecate

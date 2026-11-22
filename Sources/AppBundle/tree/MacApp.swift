@@ -147,6 +147,19 @@ final class MacApp: AbstractApp {
         }
     }
 
+    /// Cascade accordion: raise the window in z-order without activating the app.
+    /// Awaitable, so that callers can raise windows of different apps in a deterministic order.
+    /// Non-cancellable: raising a window triggers AX notifications that cancel the current refresh session.
+    /// If the raise sequence were cancellable, it would never finish and the cards would end up in a wrong z-order
+    func raiseAxWindow(_ windowId: UInt32, makeMain: Bool) async {
+        if serverArgs.isReadOnly { return }
+        _ = try? await withWindow(windowId, .nonCancellable) { window, job in
+            if makeMain { window.set(Ax.isMainAttr, true) }
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            return ()
+        }
+    }
+
     func setAxFrame(_ windowId: UInt32, _ topLeft: CGPoint?, _ size: CGSize?) {
         setFrameJobs.removeValue(forKey: windowId)?.cancel()
         setFrameJobs[windowId] = withWindowAsync(windowId, .cancellable) { [axApp] window, job in
