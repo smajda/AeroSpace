@@ -14,7 +14,7 @@ private func validateStillPopups() async throws {
         let popup = (node as! MacWindow)
         let windowLevel = getWindowLevel(for: popup.windowId)
         if try await popup.isWindowHeuristic(windowLevel, .cancellable) {
-            try await popup.relayoutWindow(on: focus.workspace, .cancellable)
+            try await popup.relayoutWindow(on: focus.workspace, .cancellable, isNewWindow: true)
             await tryOnWindowDetected(popup)
         }
     }

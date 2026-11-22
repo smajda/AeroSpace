@@ -148,6 +148,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "accordion-padding": Parser(\.accordionPadding, parseInt),
     "accordion-cascade": Parser(\.accordionCascade, parseBool),
     "accordion-rolodex": Parser(\.accordionRolodex, parseBool),
+    "stack-new-windows": Parser(\.stackNewWindows, parseBool),
     persistentWorkspacesKey: Parser(\.persistentWorkspaces, parsePersistentWorkspaces),
     "exec-on-workspace-change": Parser(\.execOnWorkspaceChange, parseArrayOfStrings),
     "exec": Parser(\.execConfig, parseExecConfig),
