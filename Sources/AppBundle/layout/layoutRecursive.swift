@@ -140,8 +140,71 @@ extension TilingContainer {
         }
     }
 
+    /// Cascade accordion (`accordion-cascade`, also used by `accordion-rolodex`). Every card (child) peeks out by `accordion-padding`.
+    /// Cards before the focused one peek out at the top (left), cards after it peek out at the bottom (right).
+    /// In rolodex mode, the focused card is always the last one (see rotateRolodexAccordions), so all cards peek out at the top:
+    ///
+    ///     ┌ card 0 ─────────┐
+    ///     ┌ card 1 ─────────┐
+    ///     ┌ card 2 (focus) ─┐
+    ///     │                 │
+    ///     └─────────────────┘
+    @MainActor
+    fileprivate func layoutCascade(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
+        guard let mruIndex: Int = mostRecentChild?.ownIndex else { return }
+        let padding = CGFloat(config.accordionPadding)
+        let lastIndex = children.count - 1
+        let length = orientation == .h ? width : height
+        for (index, child) in children.enumerated() {
+            let start = CGFloat(Swift.min(index, mruIndex)) * padding
+            let end = length - CGFloat(lastIndex - Swift.max(index, mruIndex)) * padding
+            switch orientation {
+                case .h:
+                    try await child.layoutRecursive(point + CGPoint(x: start, y: 0), width: end - start, height: height, virtual: virtual, context)
+                case .v:
+                    try await child.layoutRecursive(point + CGPoint(x: 0, y: start), width: width, height: end - start, virtual: virtual, context)
+            }
+        }
+        if context.workspace.isVisible {
+            try await raiseCascadeCards(mruIndex: mruIndex)
+        }
+    }
+
+    /// Cards must overlap in the right z-order, otherwise the peeking parts are covered by other cards.
+    /// Raise order (bottom to top): cards before the focused one in order, cards after it in reverse order, the focused card
+    @MainActor
+    private func raiseCascadeCards(mruIndex: Int) async throws {
+        if children.count < 2 { return }
+        let cardOrder = Array(children.indices.prefix(mruIndex)) + children.indices.suffix(from: mruIndex + 1).reversed() + [mruIndex]
+        var windows: [Window] = []
+        for cardIndex in cardOrder {
+            let card = children[cardIndex]
+            var cardWindows = card.allLeafWindowsRecursive
+            if let mruWindow = card.mostRecentWindowRecursive, let i = cardWindows.firstIndex(of: mruWindow) {
+                cardWindows.append(cardWindows.remove(at: i)) // The most recent window of the card goes on top
+            }
+            windows += cardWindows
+        }
+        let order = windows.map(\.windowId)
+        if getUserData(key: cascadeRaisedOrderKey) == order { return } // Already in the right z-order. Avoid flicker
+        // Remember the order only once all windows are raised. Refresh sessions are frequently cancelled (e.g. a new
+        // window triggers a burst of AX notifications). If the order were remembered upfront, a session cancelled
+        // in the middle of raising would leave the cards in a wrong z-order, and the next session would skip fixing it
+        cleanUserData(key: cascadeRaisedOrderKey)
+        cascadeRaiseInProgress += 1
+        defer { cascadeRaiseInProgress -= 1 }
+        for (i, window) in windows.enumerated() {
+            await window.nativeRaise(makeMain: i == windows.indices.last) // Non-cancellable, the sequence always completes
+        }
+        putUserData(key: cascadeRaisedOrderKey, data: order)
+    }
+
     @MainActor
     fileprivate func layoutAccordion(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
+        if config.accordionCascade || config.accordionRolodex {
+            try await layoutCascade(point, width: width, height: height, virtual: virtual, context)
+            return
+        }
         guard let mruIndex: Int = mostRecentChild?.ownIndex else { return }
         for (index, child) in children.enumerated() {
             let padding = CGFloat(config.accordionPadding)
@@ -172,5 +235,17 @@ extension TilingContainer {
                     )
             }
         }
+    }
+}
+
+private let cascadeRaisedOrderKey = TreeNodeUserDataKey<[UInt32]>(key: "cascadeRaisedOrder")
+
+/// While cascade cards are being raised, macOS may temporarily report one of the raised cards as the focused window.
+/// Refresh sessions must not pick up that intermediate focus, otherwise focus would jump to the wrong card (and a rolodex stack would rotate to it)
+@MainActor var cascadeRaiseInProgress = 0
+
+@MainActor func waitForCascadeRaises() async {
+    while cascadeRaiseInProgress > 0 {
+        try? await Task.sleep(for: .milliseconds(5))
     }
 }

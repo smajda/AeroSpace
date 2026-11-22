@@ -27,6 +27,7 @@ final class MacWindow: Window {
                 : focus.workspace,
             window: nil,
             .cancellable,
+            isNewWindow: !isStartup,
         )
 
         // atomic synchronous section
@@ -111,6 +112,10 @@ final class MacWindow: Window {
 
     @MainActor override func nativeFocus() {
         macApp.nativeFocus(windowId)
+    }
+
+    @MainActor override func nativeRaise(makeMain: Bool) async {
+        await macApp.raiseAxWindow(windowId, makeMain: makeMain)
     }
 
     override func closeAxWindow() {
@@ -201,30 +206,53 @@ final class MacWindow: Window {
 
 extension Window {
     @MainActor
-    func relayoutWindow(on workspace: Workspace, _ cm: CancellationMode, forceTile: Bool = false) async throws {
+    func relayoutWindow(on workspace: Workspace, _ cm: CancellationMode, forceTile: Bool = false, isNewWindow: Bool = false) async throws {
         let data = forceTile
-            ? unbindAndGetBindingDataForNewTilingWindow(workspace, window: self)
-            : try await unbindAndGetBindingDataForNewWindow(self.asMacWindow().windowId, self.asMacWindow().macApp, workspace, window: self, cm)
+            ? unbindAndGetBindingDataForNewTilingWindow(workspace, window: self, isNewWindow: isNewWindow)
+            : try await unbindAndGetBindingDataForNewWindow(self.asMacWindow().windowId, self.asMacWindow().macApp, workspace, window: self, cm, isNewWindow: isNewWindow)
         bind(to: data.parent, adaptiveWeight: data.adaptiveWeight, index: data.index)
     }
 }
 
 // The function is private because it's unsafe. It leaves the window in unbound state
 @MainActor
-private func unbindAndGetBindingDataForNewWindow(_ windowId: UInt32, _ macApp: MacApp, _ workspace: Workspace, window: Window?, _ cm: CancellationMode) async throws -> BindingData {
+private func unbindAndGetBindingDataForNewWindow(
+    _ windowId: UInt32,
+    _ macApp: MacApp,
+    _ workspace: Workspace,
+    window: Window?,
+    _ cm: CancellationMode,
+    isNewWindow: Bool,
+) async throws -> BindingData {
     let windowLevel = getWindowLevel(for: windowId)
     return switch try await macApp.getAxUiElementWindowType(windowId, windowLevel, cm) {
         case .popup: BindingData(parent: macosPopupWindowsContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
         case .dialog: BindingData(parent: workspace.floatingWindowsContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
-        case .window: unbindAndGetBindingDataForNewTilingWindow(workspace, window: window)
+        case .window: unbindAndGetBindingDataForNewTilingWindow(workspace, window: window, isNewWindow: isNewWindow)
     }
 }
 
 // The function is private because it's unsafe. It leaves the window in unbound state
 @MainActor
-private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: Window?) -> BindingData {
+func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: Window?, isNewWindow: Bool) -> BindingData {
     window?.unbindFromParent() // It's important to unbind to get correct data from below
     let mruWindow = workspace.mostRecentWindowRecursive
+    if isNewWindow && config.stackNewWindows, let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer,
+       tilingParent.layout == .tiles
+    {
+        // stack-new-windows: the focused window isn't in a stack yet (it's a tile of its own).
+        // Turn it into a one-window stack (accordion), so the new window joins it instead of opening a new tile
+        let data = mruWindow.unbindFromParent()
+        let stack = TilingContainer(
+            parent: tilingParent,
+            adaptiveWeight: data.adaptiveWeight,
+            tilingParent.orientation.opposite,
+            .accordion,
+            index: data.index,
+        )
+        mruWindow.bind(to: stack, adaptiveWeight: WEIGHT_AUTO, index: 0)
+        return BindingData(parent: stack, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
+    }
     if let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer {
         return BindingData(
             parent: tilingParent,
